@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Drawing Guess Game</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .game-container {
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            padding: 20px;
+            width: 800px;
+            max-width: 100%;
+            margin-bottom: 20px;
+        }
+        .canvas-container {
+            position: relative;
+            margin: 0 auto;
+            border: 2px solid #333;
+            background-color: white;
+        }
+        #drawing-canvas {
+            display: block;
+            cursor: crosshair;
+        }
+        #temp-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            pointer-events: none;
+        }
+        .controls {
+            display: flex;
+            justify-content: center;
+            margin: 15px 0;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #clear-btn {
+            background-color: #f44336;
+        }
+        #clear-btn:hover {
+            background-color: #d32f2f;
+        }
+        #guess-btn {
+            background-color: #2196F3;
+        }
+        #guess-btn:hover {
+            background-color: #0b7dda;
+        }
+        .color-picker {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .color-option {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid #ddd;
+        }
+        .color-option.selected {
+            border-color: #333;
+            transform: scale(1.1);
+        }
+        .brush-size {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        #brush-size {
+            width: 100px;
+        }
+        .word-display {
+            font-size: 24px;
+            font-weight: bold;
+            text-align: center;
+            margin: 15px 0;
+            min-height: 36px;
+            letter-spacing: 2px;
+        }
+        .guesses {
+            margin-top: 20px;
+        }
+        .guess-item {
+            padding: 8px;
+            margin: 5px 0;
+            background-color: #f0f0f0;
+            border-radius: 4px;
+        }
+        .confidence {
+            height: 20px;
+            background-color: #e0e0e0;
+            border-radius: 10px;
+            margin-top: 5px;
+            overflow: hidden;
+        }
+        .confidence-level {
+            height: 100%;
+            background-color: #4CAF50;
+            width: 0%;
+        }
+        .timer {
+            font-size: 20px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .instructions {
+            background-color: #e9f7ef;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+            width: 800px;
+            max-width: 100%;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.18.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.0"></script>
+</head>
+<body>
+    <h1>AI Drawing Guess Game</h1>
+    <p>Draw something and let the AI guess what it is!</p>
+    
+    <div class="game-container">
+        <div class="timer" id="timer">Time: 60s</div>
+        <div class="word-display" id="word-display">Draw something below</div>
+        
+        <div class="canvas-container">
+            <canvas id="drawing-canvas" width="700" height="500"></canvas>
+            <canvas id="temp-canvas" width="700" height="500"></canvas>
+        </div>
+        
+        <div class="controls">
+            <div class="color-picker">
+                <div class="color-option selected" style="background-color: black;" data-color="black"></div>
+                <div class="color-option" style="background-color: red;" data-color="red"></div>
+                <div class="color-option" style="background-color: blue;" data-color="blue"></div>
+                <div class="color-option" style="background-color: green;" data-color="green"></div>
+                <div class="color-option" style="background-color: yellow;" data-color="yellow"></div>
+            </div>
+            
+            <div class="brush-size">
+                <span>Size:</span>
+                <input type="range" id="brush-size" min="1" max="50" value="10">
+            </div>
+            
+            <button id="guess-btn">AI Guess</button>
+            <button id="clear-btn">Clear</button>
+        </div>
+        
+        <div class="guesses" id="guesses"></div>
+    </div>
+    
+    <div class="instructions">
+        <h3>How to play:</h3>
+        <ul>
+            <li>Draw anything you want on the canvas</li>
+            <li>Click "AI Guess" to see what the AI thinks your drawing is</li>
+            <li>Try to make your drawing as clear as possible</li>
+            <li>The AI will show its top 5 guesses with confidence levels</li>
+            <li>Click "Clear" to start a new drawing</li>
+        </ul>
+    </div>
+
+    <script>
+        const drawingCanvas = document.getElementById('drawing-canvas');
+        const tempCanvas = document.getElementById('temp-canvas');
+        const guessBtn = document.getElementById('guess-btn');
+        const clearBtn = document.getElementById('clear-btn');
+        const wordDisplay = document.getElementById('word-display');
+        const guessesEl = document.getElementById('guesses');
+        const timerEl = document.getElementById('timer');
+        const colorOptions = document.querySelectorAll('.color-option');
+        const brushSizeInput = document.getElementById('brush-size');
+        
+        const drawingCtx = drawingCanvas.getContext('2d');
+        const tempCtx = tempCanvas.getContext('2d');
+        
+        let isDrawing = false;
+        let lastX = 0;
+        let lastY = 0;
+        let currentColor = 'black';
+        let currentSize = 10;
+        let model;
+        let countdown;
+        let timeLeft = 60;
+        
+        // Initialize canvas
+        function initCanvas() {
+            drawingCtx.fillStyle = 'white';
+            drawingCtx.fillRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+            drawingCtx.lineCap = 'round';
+            drawingCtx.lineJoin = 'round';
+        }
+        
+        // Load the MobileNet model
+        async function loadModel() {
+            model = await mobilenet.load();
+            console.log('Model loaded');
+        }
+        
+        // Drawing functions
+        function startDrawing(e) {
+            isDrawing = true;
+            [lastX, lastY] = [e.offsetX, e.offsetY];
+        }
+        
+        function draw(e) {
+            if (!isDrawing) return;
+            
+            tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
+            
+            // Draw temporary line (for smooth drawing)
+            tempCtx.beginPath();
+            tempCtx.moveTo(lastX, lastY);
+            tempCtx.lineTo(e.offsetX, e.offsetY);
+            tempCtx.strokeStyle = currentColor;
+            tempCtx.lineWidth = currentSize;
+            tempCtx.stroke();
+            
+            // Draw permanent line
+            drawingCtx.beginPath();
+            drawingCtx.moveTo(lastX, lastY);
+            drawingCtx.lineTo(e.offsetX, e.offsetY);
+            drawingCtx.strokeStyle = currentColor;
+            drawingCtx.lineWidth = currentSize;
+            drawingCtx.stroke();
+            
+            [lastX, lastY] = [e.offsetX, e.offsetY];
+        }
+        
+        function stopDrawing() {
+            isDrawing = false;
+            tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
+        }
+        
+        // Color picker
+        colorOptions.forEach(option => {
+            option.addEventListener('click', function() {
+                colorOptions.forEach(opt => opt.classList.remove('selected'));
+                this.classList.add('selected');
+                currentColor = this.getAttribute('data-color');
+            });
+        });
+        
+        // Brush size
+        brushSizeInput.addEventListener('input', function() {
+            currentSize = this.value;
+        });
+        
+        // Clear canvas
+        clearBtn.addEventListener('click', function() {
+            initCanvas();
+            guessesEl.innerHTML = '';
+            wordDisplay.textContent = 'Draw something below';
+            resetTimer();
+        });
+        
+        // AI Guess
+        guessBtn.addEventListener('click', async function() {
+            if (!model) {
+                alert('Model is still loading. Please wait...');
+                return;
+            }
+            
+            // Create a temporary canvas for processing
+            const processingCanvas = document.createElement('canvas');
+            processingCanvas.width = 224;  // MobileNet expects 224x224
+            processingCanvas.height = 224;
+            const processingCtx = processingCanvas.getContext('2d');
+            
+            // Draw white background (in case of transparency)
+            processingCtx.fillStyle = 'white';
+            processingCtx.fillRect(0, 0, processingCanvas.width, processingCanvas.height);
+            
+            // Scale down the drawing to 224x224
+            processingCtx.drawImage(
+                drawingCanvas,
+                0, 0, drawingCanvas.width, drawingCanvas.height,
+                0, 0, processingCanvas.width, processingCanvas.height
+            );
+            
+            // Make prediction
+            const predictions = await model.classify(processingCanvas);
+            
+            // Display results
+            displayPredictions(predictions);
+            
+            // Start timer for next round
+            resetTimer();
+        });
+        
+        // Display predictions
+        function displayPredictions(predictions) {
+            guessesEl.innerHTML = '';
+            wordDisplay.textContent = 'Top guesses:';
+            
+            predictions.forEach(pred => {
+                const guessItem = document.createElement('div');
+                guessItem.className = 'guess-item';
+                
+                const guessText = document.createElement('div');
+                guessText.textContent = `${pred.className} (${(pred.probability * 100).toFixed(1)}%)`;
+                
+                const confidenceBar = document.createElement('div');
+                confidenceBar.className = 'confidence';
+                
+                const confidenceLevel = document.createElement('div');
+                confidenceLevel.className = 'confidence-level';
+                confidenceLevel.style.width = `${pred.probability * 100}%`;
+                
+                confidenceBar.appendChild(confidenceLevel);
+                guessItem.appendChild(guessText);
+                guessItem.appendChild(confidenceBar);
+                guessesEl.appendChild(guessItem);
+            });
+        }
+        
+        // Timer functions
+        function startTimer() {
+            clearInterval(countdown);
+            timeLeft = 60;
+            updateTimer();
+            
+            countdown = setInterval(() => {
+                timeLeft--;
+                updateTimer();
+                
+                if (timeLeft <= 0) {
+                    clearInterval(countdown);
+                    guessBtn.click();  // Automatically guess when time runs out
+                }
+            }, 1000);
+        }
+        
+        function resetTimer() {
+            startTimer();
+        }
+        
+        function updateTimer() {
+            timerEl.textContent = `Time: ${timeLeft}s`;
+        }
+        
+        // Event listeners
+        drawingCanvas.addEventListener('mousedown', startDrawing);
+        drawingCanvas.addEventListener('mousemove', draw);
+        drawingCanvas.addEventListener('mouseup', stopDrawing);
+        drawingCanvas.addEventListener('mouseout', stopDrawing);
+        
+        // Touch support
+        drawingCanvas.addEventListener('touchstart', handleTouch);
+        drawingCanvas.addEventListener('touchmove', handleTouch);
+        drawingCanvas.addEventListener('touchend', stopDrawing);
+        
+        function handleTouch(e) {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const rect = drawingCanvas.getBoundingClientRect();
+            const mouseEvent = new MouseEvent(
+                e.type === 'touchstart' ? 'mousedown' : 'mousemove',
+                {
+                    clientX: touch.clientX,
+                    clientY: touch.clientY,
+                    offsetX: touch.clientX - rect.left,
+                    offsetY: touch.clientY - rect.top
+                }
+            );
+            drawingCanvas.dispatchEvent(mouseEvent);
+        }
+        
+        // Initialize
+        initCanvas();
+        loadModel();
+        startTimer();
+    </script>
+</body>
+</html>
